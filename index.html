@@ -1,0 +1,220 @@
+<!--
+README
+
+Project: 简易发际线模拟器 (GitHub Pages / Gitee Pages ready)
+
+What this archive contains:
+- index.html    -> The single-page web app (upload photo, place 3 points, adjust color & opacity, clear shadow, save image)
+
+How to deploy (GitHub Pages):
+1. Create a new GitHub repository (public or private with Pages enabled).
+2. Upload index.html to the repository root (or push via git).
+3. In repository Settings -> Pages, choose branch: main (root) and save. GitHub will publish the site at:
+   https://<your-username>.github.io/<repo-name>/
+
+How to deploy (Gitee Pages):
+1. Create a new Gitee repository and upload index.html to the repository root.
+2. Enable Pages in repository settings (choose the branch and path). Gitee will publish a URL.
+
+Notes:
+- This is a purely client-side app. Photos are processed locally in the user's browser and are NOT uploaded anywhere.
+- For best mobile WeChat compatibility, use HTTPS hosting (GitHub/Gitee Pages and Vercel are fine).
+
+-->
+
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>简易发际线模拟器</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #f4f6f8; padding: 20px; display: flex; justify-content: center; }
+    .container { width: 400px; background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 6px 18px rgba(15,30,50,0.08); }
+    h1 { font-size: 18px; margin: 0 0 10px; text-align: center; color:#333; }
+    .preview-area { position: relative; width: 100%; height: 300px; border: 2px solid #cfcfcf; border-radius: 10px; overflow: hidden; background: #e9ebee; }
+    #previewImage, #drawCanvas { position: absolute; top:0; left:0; width:100%; height:100%; object-fit: cover; }
+    #placeholder { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:#9aa2ab; text-align:center; }
+    .controls { margin-top: 12px; display: grid; gap:8px; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .row > * { flex:1; }
+    button { background:#2f86f6; color:#fff; border:0; padding:10px; border-radius:8px; cursor:pointer; }
+    .btn-danger { background:#e55353; }
+    label { font-size:13px; color:#333; display:flex; gap:8px; align-items:center; }
+    input[type="file"] { display:none; }
+    .small { font-size:12px; color:#666; text-align:center; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>简易发际线模拟器</h1>
+    <div class="preview-area">
+      <img id="previewImage" alt="预览">
+      <canvas id="drawCanvas"></canvas>
+      <div id="placeholder">
+        <div>请上传照片</div>
+        <div style="font-size:12px;color:#a3abb3;margin-top:6px;">点击放置 3 个点（左额角 → 中额 → 右额角）</div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="row">
+        <button onclick="fileInput.click()">上传照片</button>
+        <input id="fileInput" type="file" accept="image/*">
+      </div>
+      <label>颜色 <input id="colorPicker" type="color" value="#303030"></label>
+      <label>透明度 <input id="alphaRange" type="range" min="0" max="1" step="0.05" value="0.6"></label>
+      <label>阴影高度 <input id="heightRange" type="range" min="50" max="300" step="10" value="150"></label>
+      <div class="row">
+        <button id="saveBtn">保存图片</button>
+        <button id="clearBtn" class="btn-danger">清除阴影</button>
+      </div>
+      <div class="small">说明：点击头像区域依次放置「左额角 → 中额 → 右额角」，可调整颜色/透明度/高度，生成后可保存。</div>
+    </div>
+  </div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const imgEl = document.getElementById('previewImage');
+const canvas = document.getElementById('drawCanvas');
+const ctx = canvas.getContext('2d');
+const placeholder = document.getElementById('placeholder');
+const colorPicker = document.getElementById('colorPicker');
+const alphaRange = document.getElementById('alphaRange');
+const heightRange = document.getElementById('heightRange');
+const saveBtn = document.getElementById('saveBtn');
+const clearBtn = document.getElementById('clearBtn');
+
+let tempPoints = [];
+let shadingPoints = null;
+let imageLoaded = false;
+
+function initCanvas() {
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+  redrawOverlay();
+}
+
+fileInput.addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    imgEl.onload = () => {
+      imageLoaded = true;
+      placeholder.style.display = 'none';
+      initCanvas();
+    };
+    imgEl.src = ev.target.result;
+  };
+  reader.readAsDataURL(f);
+});
+
+canvas.addEventListener('click', e => {
+  if (!imageLoaded) { alert('请先上传照片'); return; }
+  if (shadingPoints) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  tempPoints.push({x, y});
+  redrawOverlay();
+  if (tempPoints.length === 3) {
+    shadingPoints = tempPoints.slice();
+    tempPoints = [];
+    drawHairline(shadingPoints);
+  }
+});
+
+function redrawOverlay() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (shadingPoints) drawHairline(shadingPoints);
+  if (tempPoints.length > 0) {
+    ctx.save();
+    tempPoints.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.fillStyle = 'red';
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '12px sans-serif';
+      ctx.fillText((i+1).toString(), p.x - 4, p.y + 4);
+    });
+    ctx.restore();
+  }
+}
+
+function drawHairline(points) {
+  if (!points || points.length !== 3) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const [p1, p2, p3] = points;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y);
+  ctx.quadraticCurveTo(p2.x, p2.y, p3.x, p3.y);
+  // Instead of clipping all the way to top, we limit the top by heightRange value
+  const foreheadY = Math.max(p1.y, p2.y, p3.y);
+  const topY = Math.max(0, foreheadY - parseInt(heightRange.value));
+
+  // Create a path from the curve up to topY and close it
+  // Build the path again to clip
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y);
+  ctx.quadraticCurveTo(p2.x, p2.y, p3.x, p3.y);
+  // draw line to the top-right at topY, then to top-left at topY
+  ctx.lineTo(canvas.width, topY);
+  ctx.lineTo(0, topY);
+  ctx.closePath();
+  ctx.clip();
+
+  const hex = colorPicker.value;
+  const alpha = parseFloat(alphaRange.value);
+  // Gradient from forehead (transparent) up to topY (deep)
+  const gradient = ctx.createLinearGradient(0, foreheadY, 0, topY);
+  gradient.addColorStop(0, hexToRgba(hex, 0));
+  gradient.addColorStop(1, hexToRgba(hex, alpha));
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, topY, canvas.width, foreheadY - topY);
+  ctx.restore();
+}
+
+function hexToRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+saveBtn.addEventListener('click', () => {
+  if (!imgEl.src) { alert('请先上传照片'); return; }
+  const combined = document.createElement('canvas');
+  const w = imgEl.naturalWidth || imgEl.width;
+  const h = imgEl.naturalHeight || imgEl.height;
+  combined.width = w;
+  combined.height = h;
+  const cctx = combined.getContext('2d');
+  cctx.drawImage(imgEl, 0, 0, w, h);
+  cctx.drawImage(canvas, 0, 0, w, h);
+  const link = document.createElement('a');
+  link.download = 'smp_simulation.png';
+  link.href = combined.toDataURL();
+  link.click();
+});
+
+clearBtn.addEventListener('click', () => {
+  tempPoints = [];
+  shadingPoints = null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  redrawOverlay();
+});
+
+window.addEventListener('resize', () => {
+  if (!imageLoaded) return;
+  const prevShading = shadingPoints ? shadingPoints.slice() : null;
+  initCanvas();
+  if (prevShading) { shadingPoints = prevShading; drawHairline(shadingPoints); }
+});
+
+initCanvas();
+</script>
+</body>
+</html>
