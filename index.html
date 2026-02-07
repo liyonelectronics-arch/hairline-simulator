@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>SMP 专业模拟系统</title>
+    <title>SMP 纹发专业模拟</title>
     <style>
         :root { --primary: #1677ff; --guide: #00e5ff; }
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
@@ -11,94 +11,133 @@
         .panel { background: #262626; padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #333; }
         h3 { margin-bottom: 10px; font-size: 14px; color: #aaa; text-align: center; }
         
-        .canvas-container { position: relative; width: 100%; max-width: 600px; margin: 0 auto; background: #000; border-radius: 8px; overflow: hidden; touch-action: none; border: 1px solid #444; min-height: 400px; }
-        canvas { width: 100%; display: block; }
-        
-        /* 拍照引导框 */
-        #photoGuide {
-            position: absolute; top: 48%; left: 50%; transform: translate(-50%, -50%);
-            width: 65%; height: 75%; border: 2px dashed var(--guide); 
-            border-radius: 50% 50% 45% 45% / 42% 42% 58% 58%; 
-            pointer-events: none; z-index: 100; display: flex; align-items: center; justify-content: center;
+        /* 关键：确保没照片时也有高度，能看到边框 */
+        .canvas-container { 
+            position: relative; 
+            width: 100%; 
+            max-width: 600px; 
+            margin: 0 auto; 
+            background: #000; 
+            border-radius: 8px; 
+            overflow: hidden; 
+            touch-action: none; 
+            border: 1px solid #444; 
+            min-height: 70vh; /* 使用屏幕高度的70%，确保相框显眼 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        #photoGuide span { color: var(--guide); font-size: 12px; background: rgba(0,0,0,0.7); padding: 5px 12px; border-radius: 20px; border: 1px solid var(--guide); margin-top: 160px;}
+        canvas { width: 100%; display: block; z-index: 1; }
+        
+        /* 拍照引导框 - 初始状态必须可见 */
+        #photoGuide {
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%);
+            width: 65%; 
+            height: 60%; 
+            border: 2px dashed var(--guide); 
+            border-radius: 50%; /* 调成你要求的更圆的形状 */
+            pointer-events: none; 
+            z-index: 100; 
+            display: flex; 
+            flex-direction: column;
+            align-items: center; 
+            justify-content: center;
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+        }
+        #photoGuide span { 
+            color: var(--guide); 
+            font-size: 13px; 
+            background: rgba(0,0,0,0.6); 
+            padding: 6px 15px; 
+            border-radius: 20px; 
+            border: 1px solid var(--guide);
+            text-align: center;
+            white-space: nowrap;
+        }
 
         .anchor { position: absolute; width: 34px; height: 34px; background: rgba(255, 0, 0, 0.6); border: 2px solid #fff; border-radius: 50%; transform: translate(-50%, -50%); cursor: move; z-index: 999; display: none; }
         
         .btn-box { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        button { padding: 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        button { padding: 15px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 15px; }
         .btn-main { background: var(--primary); color: white; }
         .btn-sub { background: #444; color: #eee; }
         .btn-save { background: #218838; color: white; grid-column: span 2; margin-top: 5px; }
         
-        input[type=range] { width: 100%; accent-color: var(--primary); height: 25px; }
+        input[type=range] { width: 100%; accent-color: var(--primary); height: 30px; }
         .label-row { display: flex; justify-content: space-between; font-size: 13px; margin-top: 10px; color: #bbb; }
+        b { color: var(--primary); }
     </style>
 </head>
 <body>
 
     <div class="panel">
-        <h3>SMP 专业模拟系统</h3>
+        <h3>SMP 纹发模拟系统</h3>
         <input type="file" id="uploadInput" accept="image/*" style="display: none;">
         <div class="btn-box">
-            <button class="btn-sub" id="uploadBtn">拍照 / 上传</button>
+            <button class="btn-sub" id="uploadBtn">选取照片 / 拍照</button>
             <button class="btn-main" onclick="generateSMP()">生成模拟</button>
-            <button class="btn-save" onclick="saveResult()">下载成品方案图</button>
+            <button class="btn-save" onclick="saveResult()">保存方案图</button>
         </div>
     </div>
 
     <div class="canvas-container" id="container">
-        <div id="photoGuide"><span>请将头部放入虚线框拍照</span></div>
+        <div id="photoGuide">
+            <span>请将头部放入圆框内</span>
+        </div>
+        
         <canvas id="mainCanvas"></canvas>
-        <div id="pTop" class="anchor" style="top: 15%; left: 50%;"></div>
-        <div id="pBottom" class="anchor" style="top: 40%; left: 50%;"></div>
-        <div id="pLeft" class="anchor" style="top: 25%; left: 22%;"></div>
-        <div id="pRight" class="anchor" style="top: 25%; left: 78%;"></div>
+        
+        <div id="pTop" class="anchor" style="top: 20%; left: 50%;"></div>
+        <div id="pBottom" class="anchor" style="top: 45%; left: 50%;"></div>
+        <div id="pLeft" class="anchor" style="top: 30%; left: 25%;"></div>
+        <div id="pRight" class="anchor" style="top: 30%; left: 75%;"></div>
     </div>
 
     <div class="panel">
-        <div class="label-row"><span>点阵密度</span><span id="densityVal">120%</span></div>
+        <div class="label-row"><span>点阵密度</span><b id="densityVal">120%</b></div>
         <input type="range" id="densitySlider" min="50" max="300" value="120">
-        <div class="label-row"><span>色值深浅</span><span id="opacityVal">90%</span></div>
+        <div class="label-row"><span>色值深浅</span><b id="opacityVal">90%</b></div>
         <input type="range" id="opacitySlider" min="30" max="100" value="90">
     </div>
 
     <script>
         const canvas = document.getElementById('mainCanvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        const uploadInput = document.getElementById('uploadInput');
+        const container = document.getElementById('container');
         const uploadBtn = document.getElementById('uploadBtn');
+        const uploadInput = document.getElementById('uploadInput');
         const guide = document.getElementById('photoGuide');
         const anchors = document.querySelectorAll('.anchor');
-        const container = document.getElementById('container');
         let rawImg = null;
 
-        // 核心修复：点击按钮强制触发文件选择
-        uploadBtn.onclick = function() {
-            uploadInput.value = ''; // 清空，确保选同一张图也能触发
+        // 按钮点击触发
+        uploadBtn.onclick = () => {
+            uploadInput.value = '';
             uploadInput.click();
         };
 
-        // 文件读取逻辑优化
+        // 文件上传逻辑
         uploadInput.onchange = function(e) {
             const file = e.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
-            reader.onload = function(event) {
+            reader.onload = (event) => {
                 const img = new Image();
-                img.onload = function() {
+                img.onload = () => {
                     rawImg = img;
-                    guide.style.display = 'none'; // 隐藏引导框
+                    // 图片加载成功后才隐藏引导框
+                    guide.style.display = 'none'; 
+                    
                     const aspect = rawImg.height / rawImg.width;
                     canvas.width = 800;
                     canvas.height = 800 * aspect;
                     
-                    // 确保红点显示
-                    anchors.forEach(a => {
-                        a.style.display = 'block';
-                        a.style.zIndex = '999';
-                    });
+                    // 强制显示定位点并重绘
+                    anchors.forEach(a => a.style.display = 'block');
                     renderGuide();
                 };
                 img.src = event.target.result;
@@ -106,41 +145,34 @@
             reader.readAsDataURL(file);
         };
 
-        // 点击画布重新显示定位点
-        container.onclick = function() {
-            if (rawImg) {
-                anchors.forEach(a => a.style.display = 'block');
-                renderGuide();
+        // 点击画布切换红点显示/隐藏
+        container.onclick = (e) => {
+            if (rawImg && e.target === container || e.target === canvas) {
+                const isVisible = anchors[0].style.display === 'block';
+                anchors.forEach(a => a.style.display = isVisible ? 'none' : 'block');
+                if (!isVisible) renderGuide();
             }
         };
 
-        // 拖拽逻辑 (兼容移动端)
+        // 拖拽逻辑
         let activeAnchor = null;
-        function getEventPos(e) {
-            const rect = container.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return {
-                x: ((clientX - rect.left) / rect.width) * 100,
-                y: ((clientY - rect.top) / rect.height) * 100
-            };
-        }
-
         const handleStart = (e) => {
             if (e.target.classList.contains('anchor')) {
                 activeAnchor = e.target;
-                if (e.cancelable) e.preventDefault();
+                e.preventDefault();
             }
         };
         const handleMove = (e) => {
             if (!activeAnchor) return;
-            const pos = getEventPos(e);
-            activeAnchor.style.left = Math.max(0, Math.min(100, pos.x)) + '%';
-            activeAnchor.style.top = Math.max(0, Math.min(100, pos.y)) + '%';
+            const rect = container.getBoundingClientRect();
+            const touch = e.touches ? e.touches[0] : e;
+            const x = ((touch.clientX - rect.left) / rect.width) * 100;
+            const y = ((touch.clientY - rect.top) / rect.height) * 100;
+            activeAnchor.style.left = Math.max(0, Math.min(100, x)) + '%';
+            activeAnchor.style.top = Math.max(0, Math.min(100, y)) + '%';
             renderGuide();
-            if (e.cancelable) e.preventDefault();
         };
-        const handleEnd = () => { activeAnchor = null; };
+        const handleEnd = () => activeAnchor = null;
 
         container.addEventListener('mousedown', handleStart);
         window.addEventListener('mousemove', handleMove);
@@ -166,13 +198,13 @@
             const ry = Math.abs(B.y - T.y);
             ctx.ellipse((L.x + R.x)/2, T.y + ry, rx, ry, 0, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.fillStyle = "rgba(0, 112, 255, 0.2)"; ctx.fill();
+            ctx.fillStyle = "rgba(0, 112, 255, 0.15)"; ctx.fill();
             ctx.restore();
         }
 
         function generateSMP() {
             if (!rawImg) return;
-            anchors.forEach(a => a.style.display = 'none'); 
+            anchors.forEach(a => a.style.display = 'none');
             const density = document.getElementById('densitySlider').value / 100;
             const opacity = document.getElementById('opacitySlider').value / 100;
             const T = getPixelPos('pTop'), B = getPixelPos('pBottom'), L = getPixelPos('pLeft'), R = getPixelPos('pRight');
@@ -208,4 +240,15 @@
 
         function saveResult() {
             if (!rawImg) return;
-            const link
+            const link = document.createElement('a');
+            link.download = 'SMP_Result.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        document.querySelectorAll('input').forEach(i => {
+            i.oninput = function() { document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%'; }
+        });
+    </script>
+</body>
+</html>
