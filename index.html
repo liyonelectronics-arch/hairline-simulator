@@ -103,7 +103,7 @@
         <input type="range" id="opacitySlider" min="30" max="100" value="90">
     </div>
 
-    <script>
+<script>
         const canvas = document.getElementById('mainCanvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const container = document.getElementById('container');
@@ -112,32 +112,30 @@
         const guide = document.getElementById('photoGuide');
         const anchors = document.querySelectorAll('.anchor');
         let rawImg = null;
+        let activeAnchor = null;
 
-        // 按钮点击触发
-        uploadBtn.onclick = () => {
-            uploadInput.value = '';
-            uploadInput.click();
-        };
+        // 统一上传触发
+        uploadBtn.onclick = () => { uploadInput.value = ''; uploadInput.click(); };
 
-        // 文件上传逻辑
         uploadInput.onchange = function(e) {
             const file = e.target.files[0];
             if (!file) return;
-
             const reader = new FileReader();
             reader.onload = (event) => {
                 const img = new Image();
                 img.onload = () => {
                     rawImg = img;
-                    // 图片加载成功后才隐藏引导框
-                    guide.style.display = 'none'; 
+                    guide.style.display = 'none';
                     
+                    // 1. 标准化画布内部像素逻辑
                     const aspect = rawImg.height / rawImg.width;
                     canvas.width = 800;
                     canvas.height = 800 * aspect;
                     
-                    // 强制显示定位点并重绘
-                    anchors.forEach(a => a.style.display = 'block');
+                    // 2. 关键修复：强制让外层黑框的高度等于照片高度，消除坐标偏差
+                    container.style.height = container.offsetWidth * aspect + 'px';
+                    
+                    initAnchors();
                     renderGuide();
                 };
                 img.src = event.target.result;
@@ -145,87 +143,131 @@
             reader.readAsDataURL(file);
         };
 
-        // 点击画布切换红点显示/隐藏
-        container.onclick = (e) => {
-            if (rawImg && e.target === container || e.target === canvas) {
-                const isVisible = anchors[0].style.display === 'block';
-                anchors.forEach(a => a.style.display = isVisible ? 'none' : 'block');
-                if (!isVisible) renderGuide();
-            }
+        function initAnchors() {
+            const defaults = [
+                {id:'pTop', t:10, l:50}, {id:'pBottom', t:35, l:50},
+                {id:'pLeft', t:25, l:25}, {id:'pRight', t:25, l:75}
+            ];
+            defaults.forEach(d => {
+                const el = document.getElementById(d.id);
+                el.style.top = d.t + '%';
+                el.style.left = d.l + '%';
+                el.style.display = 'block';
+            });
+        }
+
+        // 精准捕捉手指位置并锁定在照片内
+        const getTouchPos = (e) => {
+            const rect = container.getBoundingClientRect();
+            const touch = e.touches ? e.touches[0] : e;
+            let xPer = (touch.clientX - rect.left) / rect.width;
+            let yPer = (touch.clientY - rect.top) / rect.height;
+            return {
+                x: Math.max(0, Math.min(1, xPer)) * 100,
+                y: Math.max(0, Math.min(1, yPer)) * 100
+            };
         };
 
-        // 拖拽逻辑
-        let activeAnchor = null;
         const handleStart = (e) => {
             if (e.target.classList.contains('anchor')) {
                 activeAnchor = e.target;
-                e.preventDefault();
+                if (e.cancelable) e.preventDefault();
             }
         };
+
         const handleMove = (e) => {
             if (!activeAnchor) return;
-            const rect = container.getBoundingClientRect();
-            const touch = e.touches ? e.touches[0] : e;
-            const x = ((touch.clientX - rect.left) / rect.width) * 100;
-            const y = ((touch.clientY - rect.top) / rect.height) * 100;
-            activeAnchor.style.left = Math.max(0, Math.min(100, x)) + '%';
-            activeAnchor.style.top = Math.max(0, Math.min(100, y)) + '%';
-            renderGuide();
+            const pos = getTouchPos(e);
+            activeAnchor.style.left = pos.x + '%';
+            activeAnchor.style.top = pos.y + '%';
+            renderGuide(); // 拖动时实时显示蓝色阴影，方便生手对位
+            if (e.cancelable) e.preventDefault();
         };
-        const handleEnd = () => activeAnchor = null;
 
         container.addEventListener('mousedown', handleStart);
         window.addEventListener('mousemove', handleMove);
-        window.addEventListener('mouseup', handleEnd);
+        window.addEventListener('mouseup', () => activeAnchor = null);
         container.addEventListener('touchstart', handleStart, {passive: false});
         window.addEventListener('touchmove', handleMove, {passive: false});
-        window.addEventListener('touchend', handleEnd);
+        window.addEventListener('touchend', () => activeAnchor = null);
 
-        function getPixelPos(id) {
+        // 将屏幕上的百分比 1:1 映射到画布像素
+        function getCanvasCoords(id) {
             const el = document.getElementById(id);
-            return { x: (parseFloat(el.style.left) / 100) * canvas.width, y: (parseFloat(el.style.top) / 100) * canvas.height };
+            const leftPer = parseFloat(el.style.left) / 100;
+            const topPer = parseFloat(el.style.top) / 100;
+            return {
+                x: leftPer * canvas.width,
+                y: topPer * canvas.height
+            };
         }
 
         function renderGuide() {
             if(!rawImg) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            const T = getPixelPos('pTop'), B = getPixelPos('pBottom'), L = getPixelPos('pLeft'), R = getPixelPos('pRight');
+            
+            const T = getCanvasCoords('pTop'), 
+                  B = getCanvasCoords('pBottom'), 
+                  L = getCanvasCoords('pLeft'), 
+                  R = getCanvasCoords('pRight');
+            
             ctx.save();
-            ctx.strokeStyle = "rgba(0, 191, 255, 0.8)";
-            ctx.lineWidth = 3; ctx.setLineDash([10, 5]);
             ctx.beginPath();
-            const rx = Math.abs(R.x - L.x) / 2;
-            const ry = Math.abs(B.y - T.y);
-            ctx.ellipse((L.x + R.x)/2, T.y + ry, rx, ry, 0, 0, Math.PI * 2);
+            // 以 L 点和 R 点为左右边界，T 点为顶部
+            ctx.moveTo(L.x, T.y); 
+            ctx.lineTo(R.x, T.y);
+            ctx.lineTo(R.x, R.y);
+            // 贝塞尔曲线：用 B 点作为底部弧度的控制参考
+            ctx.quadraticCurveTo((L.x + R.x)/2, B.y, L.x, L.y);
+            ctx.closePath();
+            
+            ctx.strokeStyle = "rgba(0, 229, 255, 0.8)";
+            ctx.lineWidth = 3;
+            ctx.setLineDash([8, 4]);
             ctx.stroke();
-            ctx.fillStyle = "rgba(0, 112, 255, 0.15)"; ctx.fill();
+            
+            // 填充一层半透明蓝色，直观告诉用户这里是纹发区
+            ctx.fillStyle = "rgba(0, 229, 255, 0.15)";
+            ctx.fill();
             ctx.restore();
         }
 
         function generateSMP() {
             if (!rawImg) return;
             anchors.forEach(a => a.style.display = 'none');
+            
             const density = document.getElementById('densitySlider').value / 100;
             const opacity = document.getElementById('opacitySlider').value / 100;
-            const T = getPixelPos('pTop'), B = getPixelPos('pBottom'), L = getPixelPos('pLeft'), R = getPixelPos('pRight');
+            
+            const T = getCanvasCoords('pTop'), 
+                  B = getCanvasCoords('pBottom'), 
+                  L = getCanvasCoords('pLeft'), 
+                  R = getCanvasCoords('pRight');
             
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            const centerX = (L.x + R.x) / 2, radiusX = Math.abs(R.x - L.x) / 2, radiusY = Math.abs(B.y - T.y);
             
             ctx.save();
             ctx.beginPath();
-            ctx.ellipse(centerX, T.y + radiusY, radiusX, radiusY, 0, 0, Math.PI * 2);
-            ctx.clip();
+            ctx.moveTo(L.x, T.y);
+            ctx.lineTo(R.x, T.y);
+            ctx.lineTo(R.x, R.y);
+            ctx.quadraticCurveTo((L.x + R.x)/2, B.y, L.x, L.y);
+            ctx.closePath();
+            ctx.clip(); // 这里的裁剪区域和上面的蓝色预览框完全同步
 
             const dotSize = Math.max(0.4, canvas.width / 1100);
-            const step = 3.5 / (density * 1.8); 
+            const step = 3.6 / (density * 1.8); 
+            
             for (let x = L.x - 50; x < R.x + 50; x += step) {
-                for (let y = T.y - 120; y < B.y + 100; y += step) {
-                    const curve = Math.cos((x - centerX) / (radiusX * 0.95)) * (canvas.height * 0.025);
-                    const currentLine = B.y + curve;
-                    if (y < currentLine) {
-                        const distFromEdge = currentLine - y;
-                        const feather = Math.min(1, distFromEdge / (canvas.height * 0.12));
+                for (let y = T.y - 100; y < B.y + 100; y += step) {
+                    const ratio = (x - L.x) / (R.x - L.x);
+                    // 模拟自然发际线弧度曲线
+                    const curveY = L.y + (R.y - L.y) * ratio + Math.sin(ratio * Math.PI) * (B.y - (L.y + R.y)/2) * 2;
+                    
+                    if (y < curveY) {
+                        const dist = Math.max(0, curveY - y);
+                        const feather = Math.min(1, dist / (canvas.height * 0.08));
                         if (Math.random() > (1 - feather * density * 1.2)) {
                             ctx.fillStyle = `rgba(15, 15, 18, ${opacity * feather * (Math.random() * 0.3 + 0.7)})`; 
                             ctx.beginPath();
@@ -247,7 +289,9 @@
         }
 
         document.querySelectorAll('input').forEach(i => {
-            i.oninput = function() { document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%'; }
+            i.oninput = function() { 
+                document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%'; 
+            }
         });
     </script>
 </body>
