@@ -1,190 +1,21 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>SMP 纹发品牌模拟系统</title>
-    <style>
-        :root { --primary: #1677ff; --guide: #00bfff; }
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
-        body { background: #222; color: #fff; padding: 10px; }
-        .panel { background: #2a2a2a; padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #333; }
-        h3 { margin-bottom: 10px; font-size: 14px; color: #888; text-transform: uppercase; text-align: center; }
-        
-        /* 画布容器 */
-        .canvas-container { position: relative; width: 100%; max-width: 600px; margin: 0 auto; background: #000; border-radius: 8px; overflow: hidden; touch-action: none; }
-        canvas { width: 100%; display: block; }
-        
-        /* 标准取景框 - 默认显示，引导拍照 */
-        #photoGuide {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 45%; height: 80%; border: 2px dashed var(--guide); border-radius: 50% 50% 40% 40%;
-            pointer-events: none; z-index: 5; display: flex; align-items: center; justify-content: center;
-        }
-        #photoGuide::after { content: "请将头部对准虚线框"; color: var(--guide); font-size: 12px; background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px; }
-
-        /* 定位点样式 */
-        .anchor { position: absolute; width: 34px; height: 34px; background: rgba(255, 0, 0, 0.6); border: 2px solid #fff; border-radius: 50%; transform: translate(-50%, -50%); cursor: move; z-index: 10; display: none; }
-        
-        .btn-box { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-        button { padding: 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; }
-        .btn-main { background: var(--primary); color: white; }
-        .btn-sub { background: #444; color: #eee; }
-        .btn-save { background: #218838; color: white; grid-column: span 2; margin-top: 5px; }
-        
-        input[type=range] { width: 100%; accent-color: var(--primary); cursor: pointer; height: 25px; }
-        .label-row { display: flex; justify-content: space-between; font-size: 13px; margin-top: 10px; color: #bbb; }
-    </style>
-</head>
-<body>
-
-    <div class="panel">
-        <h3>SMP 纹发品牌标准模拟</h3>
-        <input type="file" id="uploadInput" accept="image/*" capture="user" style="display: none;">
-        <div class="btn-box">
-            <button class="btn-sub" onclick="document.getElementById('uploadInput').click()">拍照 / 上传</button>
-            <button class="btn-main" onclick="generateSMP()">生成效果</button>
-            <button class="btn-save" onclick="saveResult()">下载成品图</button>
-        </div>
-    </div>
-
-    <div class="canvas-container" id="container" onclick="showAnchors()">
-        <div id="photoGuide"></div>
-        <canvas id="mainCanvas"></canvas>
-        
-        <div id="pTop" class="anchor" style="top: 15%; left: 50%;"></div>
-        <div id="pBottom" class="anchor" style="top: 40%; left: 50%;"></div>
-        <div id="pLeft" class="anchor" style="top: 25%; left: 20%;"></div>
-        <div id="pRight" class="anchor" style="top: 25%; left: 80%;"></div>
-    </div>
-
-    <div class="panel">
-        <div class="label-row"><span>点阵密度</span><span id="densityVal">120%</span></div>
-        <input type="range" id="densitySlider" min="50" max="300" value="120">
-        <div class="label-row"><span>色值深浅</span><span id="opacityVal">90%</span></div>
-        <input type="range" id="opacitySlider" min="30" max="100" value="90">
-    </div>
-
-    <script>
-        const canvas = document.getElementById('mainCanvas');
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        const container = document.getElementById('container');
-        const guide = document.getElementById('photoGuide');
-        const anchors = document.querySelectorAll('.anchor');
-        let rawImg = null;
-
-        // 上传与初始化
-        document.getElementById('uploadInput').onchange = function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                rawImg = new Image();
-                rawImg.onload = function() {
-                    // 隐藏引导框
-                    guide.style.display = 'none';
-                    // 适配画布比例
-                    const aspect = rawImg.height / rawImg.width;
-                    canvas.width = 800; 
-                    canvas.height = 800 * aspect;
-                    renderGuide();
-                };
-                rawImg.src = event.target.result;
-            };
-            reader.readAsDataURL(file);
-        };
-
-        // 拖拽逻辑 (继承自 Perfect v3.2)
-        let activeAnchor = null;
-        const startDrag = (e) => { if (e.target.classList.contains('anchor')) activeAnchor = e.target; e.preventDefault(); };
-        container.addEventListener('touchstart', startDrag, {passive: false});
-        container.addEventListener('mousedown', startDrag);
-        
-        const drag = (e) => {
-            if (!activeAnchor) return;
-            const rect = container.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            activeAnchor.style.left = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)) + '%';
-            activeAnchor.style.top = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100)) + '%';
-            renderGuide();
-        };
-        window.addEventListener('touchmove', drag, {passive: false});
-        window.addEventListener('mousemove', drag);
-        window.addEventListener('mouseup', () => activeAnchor = null);
-        window.addEventListener('touchend', () => activeAnchor = null);
-
-        function showAnchors() { if (rawImg) anchors.forEach(a => a.style.display = 'block'); }
-
-        function renderGuide() {
-            if(!rawImg) return;
-            ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            anchors.forEach(a => a.style.display = 'block');
-            const T = getPixelPos('pTop'), B = getPixelPos('pBottom'), L = getPixelPos('pLeft'), R = getPixelPos('pRight');
-            ctx.save();
-            ctx.strokeStyle = "rgba(0, 191, 255, 0.8)";
-            ctx.lineWidth = 3; ctx.setLineDash([10, 5]);
-            ctx.beginPath();
-            const rx = Math.abs(R.x - L.x) / 2;
-            const ry = Math.abs(B.y - T.y);
-            ctx.ellipse((L.x + R.x)/2, T.y + ry, rx, ry, 0, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.fillStyle = "rgba(0, 112, 255, 0.2)"; ctx.fill();
-            ctx.restore();
-        }
-
-        function getPixelPos(id) {
-            const el = document.getElementById(id);
-            return { x: (parseFloat(el.style.left) / 100) * canvas.width, y: (parseFloat(el.style.top) / 100) * canvas.height };
-        }
-
-        function generateSMP() {
-            if (!rawImg) return;
-            anchors.forEach(a => a.style.display = 'none');
-            const density = document.getElementById('densitySlider').value / 100;
-            const opacity = document.getElementById('opacitySlider').value / 100;
-            const T = getPixelPos('pTop'), B = getPixelPos('pBottom'), L = getPixelPos('pLeft'), R = getPixelPos('pRight');
-            
-            ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            const centerX = (L.x + R.x) / 2, radiusX = Math.abs(R.x - L.x) / 2, radiusY = Math.abs(B.y - T.y);
-            
-            ctx.save();
-            ctx.beginPath();
-            ctx.ellipse(centerX, T.y + radiusY, radiusX, radiusY, 0, 0, Math.PI * 2);
-            ctx.clip();
-
-            const dotSize = Math.max(0.4, canvas.width / 1100);
-            const step = 3.2 / (density * 1.8); 
-            for (let x = L.x - 50; x < R.x + 50; x += step) {
-                for (let y = T.y - 100; y < B.y + 50; y += step) {
-                    const curve = Math.cos((x - centerX) / (radiusX * 0.82)) * (canvas.height * 0.045);
-                    const currentLine = B.y + curve;
-                    if (y < currentLine) {
-                        const distFromEdge = currentLine - y;
-                        const feather = Math.min(1, distFromEdge / (canvas.height * 0.1));
-                        if (Math.random() > (1 - feather * density * 1.2)) {
-                            ctx.fillStyle = `rgba(15, 15, 18, ${opacity * feather * (Math.random() * 0.3 + 0.7)})`; 
-                            ctx.beginPath();
-                            ctx.arc(x + (Math.random()-0.5)*1.5, y + (Math.random()-0.5)*1.5, dotSize, 0, Math.PI * 2);
-                            ctx.fill();
-                        }
-                    }
-                }
-            }
-            ctx.restore();
-        }
-
-        function saveResult() {
-            if (!rawImg) return;
-            const link = document.createElement('a');
-            link.download = 'SMP_Result.png';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        }
-
-        document.querySelectorAll('input').forEach(i => {
-            i.oninput = function() { document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%'; }
-        });
-    </script>
-</body>
-</html>
+/* 标准取景框 - 优化后：更小、更圆 */
+#photoGuide {
+    position: absolute; 
+    top: 50%; 
+    left: 50%; 
+    transform: translate(-50%, -50%);
+    
+    /* 调整大小：从 70%/80% 缩小到 55%/65% */
+    width: 55%;  
+    height: 65%; 
+    
+    /* 调整形状：border-radius 设为 50% 就会变成完美的椭圆/圆 */
+    border: 2px dashed var(--guide); 
+    border-radius: 50%; 
+    
+    pointer-events: none; 
+    z-index: 5; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
+}
