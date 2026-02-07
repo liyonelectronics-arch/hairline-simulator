@@ -114,7 +114,6 @@
         let rawImg = null;
         let activeAnchor = null;
 
-        // 统一上传触发
         uploadBtn.onclick = () => { uploadInput.value = ''; uploadInput.click(); };
 
         uploadInput.onchange = function(e) {
@@ -126,15 +125,10 @@
                 img.onload = () => {
                     rawImg = img;
                     guide.style.display = 'none';
-                    
-                    // 1. 标准化画布内部像素逻辑
                     const aspect = rawImg.height / rawImg.width;
                     canvas.width = 800;
                     canvas.height = 800 * aspect;
-                    
-                    // 2. 关键修复：强制让外层黑框的高度等于照片高度，消除坐标偏差
                     container.style.height = container.offsetWidth * aspect + 'px';
-                    
                     initAnchors();
                     renderGuide();
                 };
@@ -145,26 +139,22 @@
 
         function initAnchors() {
             const defaults = [
-                {id:'pTop', t:10, l:50}, {id:'pBottom', t:35, l:50},
-                {id:'pLeft', t:25, l:25}, {id:'pRight', t:25, l:75}
+                {id:'pTop', t:15, l:50}, {id:'pBottom', t:38, l:50},
+                {id:'pLeft', t:28, l:25}, {id:'pRight', t:28, l:75}
             ];
             defaults.forEach(d => {
                 const el = document.getElementById(d.id);
-                el.style.top = d.t + '%';
-                el.style.left = d.l + '%';
+                el.style.top = d.t + '%'; el.style.left = d.l + '%';
                 el.style.display = 'block';
             });
         }
 
-        // 精准捕捉手指位置并锁定在照片内
         const getTouchPos = (e) => {
             const rect = container.getBoundingClientRect();
             const touch = e.touches ? e.touches[0] : e;
-            let xPer = (touch.clientX - rect.left) / rect.width;
-            let yPer = (touch.clientY - rect.top) / rect.height;
             return {
-                x: Math.max(0, Math.min(1, xPer)) * 100,
-                y: Math.max(0, Math.min(1, yPer)) * 100
+                x: Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width)) * 100,
+                y: Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height)) * 100
             };
         };
 
@@ -180,55 +170,48 @@
             const pos = getTouchPos(e);
             activeAnchor.style.left = pos.x + '%';
             activeAnchor.style.top = pos.y + '%';
-            renderGuide(); // 拖动时实时显示蓝色阴影，方便生手对位
+            renderGuide();
             if (e.cancelable) e.preventDefault();
         };
 
-        container.addEventListener('mousedown', handleStart);
+        // 点击画布重新显示红点（解决不能再次定位的问题）
+        container.onclick = (e) => {
+            if (rawImg && (e.target === container || e.target === canvas)) {
+                anchors.forEach(a => a.style.display = 'block');
+                renderGuide();
+            }
+        };
+
         window.addEventListener('mousemove', handleMove);
         window.addEventListener('mouseup', () => activeAnchor = null);
         container.addEventListener('touchstart', handleStart, {passive: false});
         window.addEventListener('touchmove', handleMove, {passive: false});
         window.addEventListener('touchend', () => activeAnchor = null);
 
-        // 将屏幕上的百分比 1:1 映射到画布像素
         function getCanvasCoords(id) {
             const el = document.getElementById(id);
-            const leftPer = parseFloat(el.style.left) / 100;
-            const topPer = parseFloat(el.style.top) / 100;
-            return {
-                x: leftPer * canvas.width,
-                y: topPer * canvas.height
-            };
+            return { x: (parseFloat(el.style.left)/100)*canvas.width, y: (parseFloat(el.style.top)/100)*canvas.height };
         }
 
+        // 绘制预览：上下都使用平滑曲线
         function renderGuide() {
             if(!rawImg) return;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            
-            const T = getCanvasCoords('pTop'), 
-                  B = getCanvasCoords('pBottom'), 
-                  L = getCanvasCoords('pLeft'), 
-                  R = getCanvasCoords('pRight');
+            const T = getCanvasCoords('pTop'), B = getCanvasCoords('pBottom'), L = getCanvasCoords('pLeft'), R = getCanvasCoords('pRight');
             
             ctx.save();
             ctx.beginPath();
-            // 以 L 点和 R 点为左右边界，T 点为顶部
-            ctx.moveTo(L.x, T.y); 
-            ctx.lineTo(R.x, T.y);
-            ctx.lineTo(R.x, R.y);
-            // 贝塞尔曲线：用 B 点作为底部弧度的控制参考
+            // 顶部改为圆弧：解决“方形”问题
+            ctx.moveTo(L.x, L.y);
+            ctx.quadraticCurveTo((L.x + R.x)/2, T.y - (B.y - T.y)*0.3, R.x, R.y);
+            // 底部发际线弧
             ctx.quadraticCurveTo((L.x + R.x)/2, B.y, L.x, L.y);
-            ctx.closePath();
             
             ctx.strokeStyle = "rgba(0, 229, 255, 0.8)";
-            ctx.lineWidth = 3;
-            ctx.setLineDash([8, 4]);
+            ctx.lineWidth = 3; ctx.setLineDash([8, 4]);
             ctx.stroke();
-            
-            // 填充一层半透明蓝色，直观告诉用户这里是纹发区
-            ctx.fillStyle = "rgba(0, 229, 255, 0.15)";
+            ctx.fillStyle = "rgba(0, 229, 255, 0.1)";
             ctx.fill();
             ctx.restore();
         }
@@ -236,42 +219,41 @@
         function generateSMP() {
             if (!rawImg) return;
             anchors.forEach(a => a.style.display = 'none');
-            
             const density = document.getElementById('densitySlider').value / 100;
             const opacity = document.getElementById('opacitySlider').value / 100;
-            
-            const T = getCanvasCoords('pTop'), 
-                  B = getCanvasCoords('pBottom'), 
-                  L = getCanvasCoords('pLeft'), 
-                  R = getCanvasCoords('pRight');
+            const T = getCanvasCoords('pTop'), B = getCanvasCoords('pBottom'), L = getCanvasCoords('pLeft'), R = getCanvasCoords('pRight');
             
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            
             ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(L.x, T.y);
-            ctx.lineTo(R.x, T.y);
-            ctx.lineTo(R.x, R.y);
-            ctx.quadraticCurveTo((L.x + R.x)/2, B.y, L.x, L.y);
-            ctx.closePath();
-            ctx.clip(); // 这里的裁剪区域和上面的蓝色预览框完全同步
-
+            
+            // 核心：点阵生成逻辑
             const dotSize = Math.max(0.4, canvas.width / 1100);
             const step = 3.6 / (density * 1.8); 
-            
-            for (let x = L.x - 50; x < R.x + 50; x += step) {
-                for (let y = T.y - 100; y < B.y + 100; y += step) {
+            const centerX = (L.x + R.x) / 2;
+            const halfW = (R.x - L.x) / 2;
+
+            for (let x = L.x - 60; x < R.x + 60; x += step) {
+                for (let y = T.y - 100; y < B.y + 50; y += step) {
+                    // 1. 计算上下两条曲线边界
                     const ratio = (x - L.x) / (R.x - L.x);
-                    // 模拟自然发际线弧度曲线
-                    const curveY = L.y + (R.y - L.y) * ratio + Math.sin(ratio * Math.PI) * (B.y - (L.y + R.y)/2) * 2;
+                    const sinRatio = Math.sin(Math.max(0, Math.min(1, ratio)) * Math.PI);
                     
-                    if (y < curveY) {
-                        const dist = Math.max(0, curveY - y);
-                        const feather = Math.min(1, dist / (canvas.height * 0.08));
-                        if (Math.random() > (1 - feather * density * 1.2)) {
-                            ctx.fillStyle = `rgba(15, 15, 18, ${opacity * feather * (Math.random() * 0.3 + 0.7)})`; 
+                    const bottomLine = L.y + (R.y - L.y) * ratio + sinRatio * (B.y - (L.y + R.y)/2) * 2;
+                    const topLine = L.y + (R.y - L.y) * ratio - sinRatio * (L.y - T.y) * 1.2;
+
+                    if (y > topLine && y < bottomLine) {
+                        // 2. 计算羽化过渡：离边缘越近点越稀疏
+                        const distToBottom = bottomLine - y;
+                        const distToTop = y - topLine;
+                        const distToSide = Math.min(x - (L.x-20), (R.x+20) - x);
+                        
+                        const edgeFeather = Math.min(1, distToBottom / (canvas.height * 0.08)) * Math.min(1, distToTop / (canvas.height * 0.05)) *
+                                            Math.min(1, distToSide / 40);
+
+                        if (Math.random() > (1 - edgeFeather * density * 1.2)) {
+                            ctx.fillStyle = `rgba(15, 15, 18, ${opacity * edgeFeather * (Math.random() * 0.4 + 0.6)})`; 
                             ctx.beginPath();
-                            ctx.arc(x + (Math.random()-0.5)*1.5, y + (Math.random()-0.5)*1.5, dotSize, 0, Math.PI * 2);
+                            ctx.arc(x + (Math.random()-0.5)*1.8, y + (Math.random()-0.5)*1.8, dotSize, 0, Math.PI * 2);
                             ctx.fill();
                         }
                     }
@@ -283,14 +265,17 @@
         function saveResult() {
             if (!rawImg) return;
             const link = document.createElement('a');
-            link.download = 'SMP_Result.png';
+            link.download = 'SMP_Consultation.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
         }
 
         document.querySelectorAll('input').forEach(i => {
             i.oninput = function() { 
-                document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%'; 
+                document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%';
+                if (!anchors[0].style.display || anchors[0].style.display === 'none') {
+                    generateSMP(); // 滑动时实时更新结果
+                }
             }
         });
     </script>
