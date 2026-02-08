@@ -128,7 +128,6 @@
                     const aspect = rawImg.height / rawImg.width;
                     canvas.width = 800;
                     canvas.height = 800 * aspect;
-                    // 关键：同步容器高度确保坐标不偏离
                     container.style.height = container.offsetWidth * aspect + 'px';
                     initAnchors();
                     renderGuide();
@@ -140,8 +139,8 @@
 
         function initAnchors() {
             const defaults = [
-                {id:'pTop', t:12, l:50}, {id:'pBottom', t:38, l:50},
-                {id:'pLeft', t:28, l:25}, {id:'pRight', t:28, l:75}
+                {id:'pTop', t:10, l:50}, {id:'pBottom', t:40, l:50},
+                {id:'pLeft', t:25, l:25}, {id:'pRight', t:25, l:75}
             ];
             defaults.forEach(d => {
                 const el = document.getElementById(d.id);
@@ -150,7 +149,6 @@
             });
         }
 
-        // 采用上一版最准的坐标逻辑
         const getTouchPos = (e) => {
             const rect = container.getBoundingClientRect();
             const touch = e.touches ? e.touches[0] : e;
@@ -158,13 +156,6 @@
                 x: Math.max(0, Math.min(100, ((touch.clientX - rect.left) / rect.width) * 100)),
                 y: Math.max(0, Math.min(100, ((touch.clientY - rect.top) / rect.height) * 100))
             };
-        };
-
-        const handleStart = (e) => {
-            if (e.target.classList.contains('anchor')) {
-                activeAnchor = e.target;
-                if (e.cancelable) e.preventDefault();
-            }
         };
 
         const handleMove = (e) => {
@@ -176,6 +167,14 @@
             if (e.cancelable) e.preventDefault();
         };
 
+        container.addEventListener('mousedown', (e) => { if(e.target.classList.contains('anchor')) activeAnchor = e.target; });
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', () => activeAnchor = null);
+        container.addEventListener('touchstart', (e) => { if(e.target.classList.contains('anchor')) activeAnchor = e.target; }, {passive: false});
+        window.addEventListener('touchmove', handleMove, {passive: false});
+        window.addEventListener('touchend', () => activeAnchor = null);
+
+        // 点击画布重新呼出定位点
         container.onclick = (e) => {
             if (rawImg && (e.target === container || e.target === canvas)) {
                 anchors.forEach(a => a.style.display = 'block');
@@ -183,38 +182,30 @@
             }
         };
 
-        window.addEventListener('mousemove', handleMove);
-        window.addEventListener('mouseup', () => activeAnchor = null);
-        container.addEventListener('touchstart', handleStart, {passive: false});
-        window.addEventListener('touchmove', handleMove, {passive: false});
-        window.addEventListener('touchend', () => activeAnchor = null);
-
         function getCanvasCoords(id) {
             const el = document.getElementById(id);
-            return { 
-                x: (parseFloat(el.style.left)/100) * canvas.width, 
-                y: (parseFloat(el.style.top)/100) * canvas.height 
-            };
+            return { x: (parseFloat(el.style.left)/100)*canvas.width, y: (parseFloat(el.style.top)/100)*canvas.height };
         }
 
-        // 路径生成器：确保上下都是自然的圆弧
-        function drawHairPath(ctx, T, B, L, R) {
-            ctx.beginPath();
-            ctx.moveTo(L.x, L.y);
-            // 顶部弧线：受 pTop 控制
-            ctx.quadraticCurveTo((L.x + R.x)/2, T.y, R.x, R.y);
-            // 底部弧线：受 pBottom 控制
-            ctx.quadraticCurveTo((L.x + R.x)/2, B.y, L.x, L.y);
-            ctx.closePath();
+        // 核心数学模型：基于 4 点计算精准椭圆
+        function getEllipseParams() {
+            const T = getCanvasCoords('pTop'), B = getCanvasCoords('pBottom'), L = getCanvasCoords('pLeft'), R = getCanvasCoords('pRight');
+            return {
+                cx: (L.x + R.x) / 2,
+                cy: (T.y + B.y) / 2,
+                rx: Math.abs(R.x - L.x) / 2,
+                ry: Math.abs(B.y - T.y) / 2
+            };
         }
 
         function renderGuide() {
             if(!rawImg) return;
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            const T = getCanvasCoords('pTop'), B = getCanvasCoords('pBottom'), L = getCanvasCoords('pLeft'), R = getCanvasCoords('pRight');
+            const p = getEllipseParams();
             
             ctx.save();
-            drawHairPath(ctx, T, B, L, R);
+            ctx.beginPath();
+            ctx.ellipse(p.cx, p.cy, p.rx, p.ry, 0, 0, Math.PI * 2);
             ctx.strokeStyle = "rgba(0, 229, 255, 0.8)";
             ctx.lineWidth = 3; ctx.setLineDash([8, 4]);
             ctx.stroke();
@@ -228,32 +219,29 @@
             anchors.forEach(a => a.style.display = 'none');
             const density = document.getElementById('densitySlider').value / 100;
             const opacity = document.getElementById('opacitySlider').value / 100;
-            const T = getCanvasCoords('pTop'), B = getCanvasCoords('pBottom'), L = getCanvasCoords('pLeft'), R = getCanvasCoords('pRight');
+            const p = getEllipseParams();
             
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
             
             const dotSize = Math.max(0.4, canvas.width / 1100);
             const step = 3.6 / (density * 1.8); 
-            
-            // 采样范围
-            for (let x = L.x - 50; x < R.x + 50; x += step) {
-                for (let y = T.y - 50; y < B.y + 50; y += step) {
-                    const ratio = (x - L.x) / (R.x - L.x);
-                    const arcEffect = Math.sin(Math.max(0, Math.min(1, ratio)) * Math.PI);
-                    
-                    // 计算当前X轴对应的上下边界Y值
-                    const currentTopY = L.y + (R.y - L.y) * ratio - arcEffect * (L.y - T.y) * 2;
-                    const currentBottomY = L.y + (R.y - L.y) * ratio + arcEffect * (B.y - (L.y + R.y)/2) * 2;
 
-                    if (y > currentTopY && y < currentBottomY) {
-                        // 核心过渡算法：计算点到上下边缘的距离
-                        const distToEdge = Math.min(y - currentTopY, currentBottomY - y);
-                        const featherArea = canvas.height * 0.08; // 过渡带宽度
-                        const feather = Math.min(1, distToEdge / featherArea);
-                        
-                        // 综合羽化：边缘处密度和透明度双重下降
-                        if (Math.random() > (1 - feather * density * 1.2)) {
-                            ctx.fillStyle = `rgba(15, 15, 18, ${opacity * feather * (Math.random() * 0.3 + 0.7)})`; 
+            // 扫描整个椭圆包围盒
+            for (let x = p.cx - p.rx; x < p.cx + p.rx; x += step) {
+                for (let y = p.cy - p.ry; y < p.cy + p.ry; y += step) {
+                    
+                    // 椭圆判别式: (x-cx)^2/rx^2 + (y-cy)^2/ry^2 <= 1
+                    const dx = (x - p.cx) / p.rx;
+                    const dy = (y - p.cy) / p.ry;
+                    const distSq = dx * dx + dy * dy;
+
+                    if (distSq <= 1) {
+                        // 羽化计算：越靠近边缘（distSq 接近 1），feather 越小
+                        const feather = Math.pow(1 - distSq, 0.5); 
+                        const finalFeather = Math.min(1, feather / 0.2); // 0.2 定义了边缘过渡带的宽度
+
+                        if (Math.random() > (1 - finalFeather * density * 1.2)) {
+                            ctx.fillStyle = `rgba(15, 15, 18, ${opacity * finalFeather * (Math.random() * 0.3 + 0.7)})`; 
                             ctx.beginPath();
                             ctx.arc(x + (Math.random()-0.5)*1.5, y + (Math.random()-0.5)*1.5, dotSize, 0, Math.PI * 2);
                             ctx.fill();
@@ -266,7 +254,7 @@
         function saveResult() {
             if (!rawImg) return;
             const link = document.createElement('a');
-            link.download = 'SMP_Plan.png';
+            link.download = 'SMP_Result.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
         }
@@ -274,7 +262,7 @@
         document.querySelectorAll('input').forEach(i => {
             i.oninput = function() { 
                 document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%';
-                if (anchors[0].style.display === 'none') generateSMP(); 
+                if (anchors[0].style.display === 'none') generateSMP();
             }
         });
     </script>
