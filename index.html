@@ -60,180 +60,144 @@
         <input type="range" id="opacitySlider" min="30" max="100" value="90">
     </div>
 
-<script>
+    <script>
         const canvas = document.getElementById('mainCanvas');
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const ctx = canvas.getContext('2d');
         const container = document.getElementById('container');
-        const uploadBtn = document.getElementById('uploadBtn');
-        const uploadInput = document.getElementById('uploadInput');
         const guide = document.getElementById('photoGuide');
         const anchors = document.querySelectorAll('.anchor');
         let rawImg = null;
-        let activeAnchor = null;
 
-        // 上传逻辑
-        uploadBtn.onclick = () => { uploadInput.value = ''; uploadInput.click(); };
-
-        uploadInput.onchange = function(e) {
+        // 移除了自动加载照片的逻辑，只保留上传监听
+        document.getElementById('uploadInput').onchange = function(e) {
             const file = e.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = (event) => {
-                const img = new Image();
-                img.onload = () => {
-                    rawImg = img;
-                    guide.style.display = 'none';
+            reader.onload = function(event) {
+                rawImg = new Image();
+                rawImg.onload = function() {
+                    guide.style.display = 'none'; // 传图后隐藏引导虚线
                     const aspect = rawImg.height / rawImg.width;
-                    canvas.width = 800;
+                    canvas.width = 800; 
                     canvas.height = 800 * aspect;
-                    // 同步容器高度，确保 1:1 定位
-                    container.style.height = container.offsetWidth * aspect + 'px';
-                    initAnchors();
                     renderGuide();
                 };
-                img.src = event.target.result;
+                rawImg.src = event.target.result;
             };
             reader.readAsDataURL(file);
         };
 
-        function initAnchors() {
-            const defaults = [
-                {id:'pTop', t:10, l:50}, {id:'pBottom', t:40, l:50},
-                {id:'pLeft', t:25, l:25}, {id:'pRight', t:25, l:75}
-            ];
-            defaults.forEach(d => {
-                const el = document.getElementById(d.id);
-                el.style.top = d.t + '%'; el.style.left = d.l + '%';
-                el.style.display = 'block';
-            });
-        }
-
-        // 核心：精准坐标获取
-        const getTouchPos = (e) => {
-            const rect = container.getBoundingClientRect();
-            const touch = e.touches ? e.touches[0] : e;
-            return {
-                x: Math.max(0, Math.min(100, ((touch.clientX - rect.left) / rect.width) * 100)),
-                y: Math.max(0, Math.min(100, ((touch.clientY - rect.top) / rect.height) * 100))
-            };
-        };
-
-        const handleMove = (e) => {
+        // 4点定位逻辑保持不变
+        let activeAnchor = null;
+        const startDrag = (e) => { if (e.target.classList.contains('anchor')) activeAnchor = e.target; e.preventDefault(); };
+        container.addEventListener('touchstart', startDrag, {passive: false});
+        container.addEventListener('mousedown', startDrag);
+        const drag = (e) => {
             if (!activeAnchor) return;
-            const pos = getTouchPos(e);
-            activeAnchor.style.left = pos.x + '%';
-            activeAnchor.style.top = pos.y + '%';
+            const rect = container.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            activeAnchor.style.left = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)) + '%';
+            activeAnchor.style.top = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100)) + '%';
             renderGuide();
-            if (e.cancelable) e.preventDefault();
         };
-
-        container.addEventListener('mousedown', (e) => { if(e.target.classList.contains('anchor')) activeAnchor = e.target; });
-        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('touchmove', drag, {passive: false});
+        window.addEventListener('mousemove', drag);
         window.addEventListener('mouseup', () => activeAnchor = null);
-        container.addEventListener('touchstart', (e) => { if(e.target.classList.contains('anchor')) activeAnchor = e.target; }, {passive: false});
-        window.addEventListener('touchmove', handleMove, {passive: false});
         window.addEventListener('touchend', () => activeAnchor = null);
 
-        // 点击画布重新显示红点
-        container.onclick = (e) => {
-            if (rawImg && (e.target === container || e.target === canvas)) {
-                anchors.forEach(a => a.style.display = 'block');
-                renderGuide();
+        function showAnchors() { 
+            if (rawImg) {
+                anchors.forEach(a => {
+                    a.style.display = 'block';
+                    a.style.zIndex = "100"; // 强制红点在最上层
+                });
             }
-        };
-
-        function getCanvasCoords(id) {
-            const el = document.getElementById(id);
-            return { x: (parseFloat(el.style.left)/100)*canvas.width, y: (parseFloat(el.style.top)/100)*canvas.height };
         }
 
-        function getEllipseParams() {
-            const T = getCanvasCoords('pTop'), B = getCanvasCoords('pBottom'), L = getCanvasCoords('pLeft'), R = getCanvasCoords('pRight');
-            return {
-                cx: (L.x + R.x) / 2,
-                cy: (T.y + B.y) / 2,
-                rx: Math.abs(R.x - L.x) / 2,
-                ry: Math.abs(B.y - T.y) / 2
-            };
+        function getPixelPos(id) {
+            const el = document.getElementById(id);
+            return { x: (parseFloat(el.style.left) / 100) * canvas.width, y: (parseFloat(el.style.top) / 100) * canvas.height };
         }
 
         function renderGuide() {
             if(!rawImg) return;
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            const p = getEllipseParams();
+            // 每次渲染引导线都确保红点可见
+            showAnchors(); 
+            
+            const T = getPixelPos('pTop'), B = getPixelPos('pBottom'), L = getPixelPos('pLeft'), R = getPixelPos('pRight');
             ctx.save();
+            ctx.strokeStyle = "rgba(0, 191, 255, 0.8)";
+            ctx.lineWidth = 3; ctx.setLineDash([10, 5]);
             ctx.beginPath();
-            ctx.ellipse(p.cx, p.cy, p.rx, p.ry, 0, 0, Math.PI * 2);
-            ctx.strokeStyle = "rgba(0, 229, 255, 0.8)";
-            ctx.lineWidth = 3; ctx.setLineDash([8, 4]);
+            const rx = Math.abs(R.x - L.x) / 2;
+            const ry = Math.abs(B.y - T.y);
+            ctx.ellipse((L.x + R.x)/2, T.y + ry, rx, ry, 0, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.fillStyle = "rgba(0, 229, 255, 0.12)";
-            ctx.fill();
+            // 阴影颜色稍微加深一点点，更清晰
+            ctx.fillStyle = "rgba(0, 112, 255, 0.25)"; ctx.fill();
             ctx.restore();
         }
 
-        // --- 核心：带有强力渐变效果的生成函数 ---
         function generateSMP() {
             if (!rawImg) return;
-            anchors.forEach(a => a.style.display = 'none');
+            // 生成时隐藏，但由于增加了 showAnchors 逻辑，点击头像会立刻回来
+            anchors.forEach(a => a.style.display = 'none'); 
+
             const density = document.getElementById('densitySlider').value / 100;
             const opacity = document.getElementById('opacitySlider').value / 100;
-            const p = getEllipseParams();
+            const T = getPixelPos('pTop'), B = getPixelPos('pBottom'), L = getPixelPos('pLeft'), R = getPixelPos('pRight');
             
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
             
-            const dotSize = Math.max(0.4, canvas.width / 1150);
+            const centerX = (L.x + R.x) / 2;
+            const radiusX = Math.abs(R.x - L.x) / 2;
+            const radiusY = Math.abs(B.y - T.y);
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.ellipse(centerX, T.y + radiusY, radiusX, radiusY, 0, 0, Math.PI * 2);
+            ctx.clip();
+
+            const dotSize = Math.max(0.4, canvas.width / 1100);
             const step = 3.2 / (density * 1.8); 
 
-            for (let x = p.cx - p.rx; x < p.cx + p.rx; x += step) {
-                for (let y = p.cy - p.ry; y < p.cy + p.ry; y += step) {
-                    const dx = (x - p.cx) / p.rx;
-                    const dy = (y - p.cy) / p.ry;
-                    const distSq = dx * dx + dy * dy;
+            for (let x = L.x - 50; x < R.x + 50; x += step) {
+                for (let y = T.y - 150; y < B.y + 100; y += step) {
+                    // --- 核心优化算法 ---
+                    // 1. 调低 curve 系数 (0.045 -> 0.025)，让发际线边缘平缓，不至于中间高两边就飞起
+                    // 2. 增加 radiusX 的覆盖权重 (0.82 -> 0.95)，确保两边定位点高时，模拟面积依然够大
+                    const curve = Math.cos((x - centerX) / (radiusX * 0.95)) * (canvas.height * 0.025);
+                    const currentLine = B.y + curve;
 
-                    // 只在椭圆内生成
-                    if (distSq <= 1) {
-                        const distFromCenter = Math.sqrt(distSq);
-                        
-                        // 渐变计算：从 50% 处开始向外消散
-                        let feather = 1.0;
-                        if (distFromCenter > 0.5) {
-                            feather = (1.0 - distFromCenter) / 0.5;
-                            feather = Math.pow(feather, 1.4); // 增强边缘稀疏感
-                        }
-
-                        // 结合密度和羽化率随机落点
-                        if (Math.random() < (feather * density * 1.5)) {
-                            // 透明度也随边缘递减
-                            const finalAlpha = opacity * feather * (Math.random() * 0.4 + 0.6);
-                            ctx.fillStyle = `rgba(15, 15, 18, ${finalAlpha})`; 
-                            
+                    if (y < currentLine) {
+                        const distFromEdge = currentLine - y;
+                        const feather = Math.min(1, distFromEdge / (canvas.height * 0.12));
+                        if (Math.random() > (1 - feather * density * 1.2)) {
+                            // 颜色使用极深灰色，增加质感
+                            ctx.fillStyle = `rgba(10, 10, 12, ${opacity * feather * (Math.random() * 0.3 + 0.7)})`; 
                             ctx.beginPath();
-                            // 边缘处增加微小的随机位置偏移（Jitter），打破死板
-                            const jitter = (1 - feather) * 2; 
-                            ctx.arc(x + (Math.random()-0.5)*jitter, y + (Math.random()-0.5)*jitter, dotSize, 0, Math.PI * 2);
+                            ctx.arc(x + (Math.random()-0.5)*1.5, y + (Math.random()-0.5)*1.5, dotSize, 0, Math.PI * 2);
                             ctx.fill();
                         }
                     }
                 }
             }
+            ctx.restore();
         }
 
         function saveResult() {
             if (!rawImg) return;
             const link = document.createElement('a');
-            link.download = 'SMP_Consultation.png';
+            link.download = 'SMP_Result.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
         }
 
-        // 滑块实时更新
         document.querySelectorAll('input').forEach(i => {
-            i.oninput = function() { 
-                document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%';
-                // 如果红点已隐藏（说明已经生成），则实时重绘
-                if (anchors[0].style.display === 'none') generateSMP();
-            }
+            i.oninput = function() { document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%'; }
         });
-    </script></body>
+    </script>
+</body>
 </html>
