@@ -128,6 +128,7 @@
                     const aspect = rawImg.height / rawImg.width;
                     canvas.width = 800;
                     canvas.height = 800 * aspect;
+                    // 关键：同步容器高度确保坐标不偏离
                     container.style.height = container.offsetWidth * aspect + 'px';
                     initAnchors();
                     renderGuide();
@@ -139,7 +140,7 @@
 
         function initAnchors() {
             const defaults = [
-                {id:'pTop', t:15, l:50}, {id:'pBottom', t:38, l:50},
+                {id:'pTop', t:12, l:50}, {id:'pBottom', t:38, l:50},
                 {id:'pLeft', t:28, l:25}, {id:'pRight', t:28, l:75}
             ];
             defaults.forEach(d => {
@@ -149,12 +150,13 @@
             });
         }
 
+        // 采用上一版最准的坐标逻辑
         const getTouchPos = (e) => {
             const rect = container.getBoundingClientRect();
             const touch = e.touches ? e.touches[0] : e;
             return {
-                x: Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width)) * 100,
-                y: Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height)) * 100
+                x: Math.max(0, Math.min(100, ((touch.clientX - rect.left) / rect.width) * 100)),
+                y: Math.max(0, Math.min(100, ((touch.clientY - rect.top) / rect.height) * 100))
             };
         };
 
@@ -174,7 +176,6 @@
             if (e.cancelable) e.preventDefault();
         };
 
-        // 点击画布重新显示红点（解决不能再次定位的问题）
         container.onclick = (e) => {
             if (rawImg && (e.target === container || e.target === canvas)) {
                 anchors.forEach(a => a.style.display = 'block');
@@ -190,28 +191,34 @@
 
         function getCanvasCoords(id) {
             const el = document.getElementById(id);
-            return { x: (parseFloat(el.style.left)/100)*canvas.width, y: (parseFloat(el.style.top)/100)*canvas.height };
+            return { 
+                x: (parseFloat(el.style.left)/100) * canvas.width, 
+                y: (parseFloat(el.style.top)/100) * canvas.height 
+            };
         }
 
-        // 绘制预览：上下都使用平滑曲线
+        // 路径生成器：确保上下都是自然的圆弧
+        function drawHairPath(ctx, T, B, L, R) {
+            ctx.beginPath();
+            ctx.moveTo(L.x, L.y);
+            // 顶部弧线：受 pTop 控制
+            ctx.quadraticCurveTo((L.x + R.x)/2, T.y, R.x, R.y);
+            // 底部弧线：受 pBottom 控制
+            ctx.quadraticCurveTo((L.x + R.x)/2, B.y, L.x, L.y);
+            ctx.closePath();
+        }
+
         function renderGuide() {
             if(!rawImg) return;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
             const T = getCanvasCoords('pTop'), B = getCanvasCoords('pBottom'), L = getCanvasCoords('pLeft'), R = getCanvasCoords('pRight');
             
             ctx.save();
-            ctx.beginPath();
-            // 顶部改为圆弧：解决“方形”问题
-            ctx.moveTo(L.x, L.y);
-            ctx.quadraticCurveTo((L.x + R.x)/2, T.y - (B.y - T.y)*0.3, R.x, R.y);
-            // 底部发际线弧
-            ctx.quadraticCurveTo((L.x + R.x)/2, B.y, L.x, L.y);
-            
+            drawHairPath(ctx, T, B, L, R);
             ctx.strokeStyle = "rgba(0, 229, 255, 0.8)";
             ctx.lineWidth = 3; ctx.setLineDash([8, 4]);
             ctx.stroke();
-            ctx.fillStyle = "rgba(0, 229, 255, 0.1)";
+            ctx.fillStyle = "rgba(0, 229, 255, 0.15)";
             ctx.fill();
             ctx.restore();
         }
@@ -224,48 +231,42 @@
             const T = getCanvasCoords('pTop'), B = getCanvasCoords('pBottom'), L = getCanvasCoords('pLeft'), R = getCanvasCoords('pRight');
             
             ctx.drawImage(rawImg, 0, 0, canvas.width, canvas.height);
-            ctx.save();
             
-            // 核心：点阵生成逻辑
             const dotSize = Math.max(0.4, canvas.width / 1100);
             const step = 3.6 / (density * 1.8); 
-            const centerX = (L.x + R.x) / 2;
-            const halfW = (R.x - L.x) / 2;
-
-            for (let x = L.x - 60; x < R.x + 60; x += step) {
-                for (let y = T.y - 100; y < B.y + 50; y += step) {
-                    // 1. 计算上下两条曲线边界
+            
+            // 采样范围
+            for (let x = L.x - 50; x < R.x + 50; x += step) {
+                for (let y = T.y - 50; y < B.y + 50; y += step) {
                     const ratio = (x - L.x) / (R.x - L.x);
-                    const sinRatio = Math.sin(Math.max(0, Math.min(1, ratio)) * Math.PI);
+                    const arcEffect = Math.sin(Math.max(0, Math.min(1, ratio)) * Math.PI);
                     
-                    const bottomLine = L.y + (R.y - L.y) * ratio + sinRatio * (B.y - (L.y + R.y)/2) * 2;
-                    const topLine = L.y + (R.y - L.y) * ratio - sinRatio * (L.y - T.y) * 1.2;
+                    // 计算当前X轴对应的上下边界Y值
+                    const currentTopY = L.y + (R.y - L.y) * ratio - arcEffect * (L.y - T.y) * 2;
+                    const currentBottomY = L.y + (R.y - L.y) * ratio + arcEffect * (B.y - (L.y + R.y)/2) * 2;
 
-                    if (y > topLine && y < bottomLine) {
-                        // 2. 计算羽化过渡：离边缘越近点越稀疏
-                        const distToBottom = bottomLine - y;
-                        const distToTop = y - topLine;
-                        const distToSide = Math.min(x - (L.x-20), (R.x+20) - x);
+                    if (y > currentTopY && y < currentBottomY) {
+                        // 核心过渡算法：计算点到上下边缘的距离
+                        const distToEdge = Math.min(y - currentTopY, currentBottomY - y);
+                        const featherArea = canvas.height * 0.08; // 过渡带宽度
+                        const feather = Math.min(1, distToEdge / featherArea);
                         
-                        const edgeFeather = Math.min(1, distToBottom / (canvas.height * 0.08)) * Math.min(1, distToTop / (canvas.height * 0.05)) *
-                                            Math.min(1, distToSide / 40);
-
-                        if (Math.random() > (1 - edgeFeather * density * 1.2)) {
-                            ctx.fillStyle = `rgba(15, 15, 18, ${opacity * edgeFeather * (Math.random() * 0.4 + 0.6)})`; 
+                        // 综合羽化：边缘处密度和透明度双重下降
+                        if (Math.random() > (1 - feather * density * 1.2)) {
+                            ctx.fillStyle = `rgba(15, 15, 18, ${opacity * feather * (Math.random() * 0.3 + 0.7)})`; 
                             ctx.beginPath();
-                            ctx.arc(x + (Math.random()-0.5)*1.8, y + (Math.random()-0.5)*1.8, dotSize, 0, Math.PI * 2);
+                            ctx.arc(x + (Math.random()-0.5)*1.5, y + (Math.random()-0.5)*1.5, dotSize, 0, Math.PI * 2);
                             ctx.fill();
                         }
                     }
                 }
             }
-            ctx.restore();
         }
 
         function saveResult() {
             if (!rawImg) return;
             const link = document.createElement('a');
-            link.download = 'SMP_Consultation.png';
+            link.download = 'SMP_Plan.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
         }
@@ -273,9 +274,7 @@
         document.querySelectorAll('input').forEach(i => {
             i.oninput = function() { 
                 document.getElementById(this.id.replace('Slider', 'Val')).innerText = this.value + '%';
-                if (!anchors[0].style.display || anchors[0].style.display === 'none') {
-                    generateSMP(); // 滑动时实时更新结果
-                }
+                if (anchors[0].style.display === 'none') generateSMP(); 
             }
         });
     </script>
